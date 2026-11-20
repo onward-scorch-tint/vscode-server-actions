@@ -15,16 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
-      - name: Check required password secret
-        shell: bash
-        env:
-          CODE_SERVER_PASSWORD: ${{ secrets.CODE_SERVER_PASSWORD }}
-        run: |
-          if [[ -z "$CODE_SERVER_PASSWORD" ]]; then
-            echo "::error::Add CODE_SERVER_PASSWORD under Settings > Secrets and variables > Actions."
-            exit 1
-          fi
-
       - name: Install code-server and cloudflared
         shell: bash
         run: |
@@ -36,14 +26,12 @@ jobs:
 
       - name: Start VS Code and publish temporary tunnel
         shell: bash
-        env:
-          CODE_SERVER_PASSWORD: ${{ secrets.CODE_SERVER_PASSWORD }}
         run: |
           set -euo pipefail
 
-          PASSWORD="$CODE_SERVER_PASSWORD" code-server \
+          code-server \
             --bind-addr 127.0.0.1:8080 \
-            --auth password \
+            --auth none \
             --disable-telemetry \
             --disable-update-check \
             > "$RUNNER_TEMP/code-server.log" 2>&1 &
@@ -89,7 +77,7 @@ jobs:
             echo
             echo "**Open:** $TUNNEL_URL"
             echo
-            echo "Sign in with the password stored in the repository Actions secret `CODE_SERVER_PASSWORD`."
+            echo "**No password is required.** Anyone with this URL can access the VS Code session and terminal."
             echo
             echo "> This is a temporary public URL. Keep this workflow running while using VS Code."
           } >> "$GITHUB_STEP_SUMMARY"
