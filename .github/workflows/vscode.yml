@@ -1,0 +1,102 @@
+name: VS Code Server over Cloudflare Tunnel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-server
+  cancel-in-progress: true
+
+jobs:
+  vscode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Check required password secret
+        shell: bash
+        env:
+          CODE_SERVER_PASSWORD: ${{ secrets.CODE_SERVER_PASSWORD }}
+        run: |
+          if [[ -z "$CODE_SERVER_PASSWORD" ]]; then
+            echo "::error::Add CODE_SERVER_PASSWORD under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Install code-server and cloudflared
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://code-server.dev/install.sh | sh
+          curl -fsSL -o /tmp/cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i /tmp/cloudflared.deb
+
+      - name: Start VS Code and publish temporary tunnel
+        shell: bash
+        env:
+          CODE_SERVER_PASSWORD: ${{ secrets.CODE_SERVER_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          PASSWORD="$CODE_SERVER_PASSWORD" code-server \
+            --bind-addr 127.0.0.1:8080 \
+            --auth password \
+            --disable-telemetry \
+            --disable-update-check \
+            > "$RUNNER_TEMP/code-server.log" 2>&1 &
+          SERVER_PID=$!
+
+          cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8080 \
+            > "$RUNNER_TEMP/cloudflared.log" 2>&1 &
+          TUNNEL_PID=$!
+
+          cleanup() {
+            kill "$SERVER_PID" "$TUNNEL_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          echo "Waiting for the Cloudflare Quick Tunnel URL..."
+          TUNNEL_URL=""
+          for attempt in {1..90}; do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "::error::code-server exited unexpectedly."
+              cat "$RUNNER_TEMP/code-server.log"
+              exit 1
+            fi
+            if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+              echo "::error::cloudflared exited unexpectedly."
+              cat "$RUNNER_TEMP/cloudflared.log"
+              exit 1
+            fi
+            TUNNEL_URL="$(grep -Eo 'https://[-a-zA-Z0-9]+\.trycloudflare\.com' "$RUNNER_TEMP/cloudflared.log" | head -n 1 || true)"
+            if [[ -n "$TUNNEL_URL" ]]; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ -z "$TUNNEL_URL" ]]; then
+            echo "::error::Timed out waiting for the Quick Tunnel URL."
+            cat "$RUNNER_TEMP/cloudflared.log"
+            exit 1
+          fi
+
+          {
+            echo "## VS Code is ready"
+            echo
+            echo "**Open:** $TUNNEL_URL"
+            echo
+            echo "Sign in with the password stored in the repository Actions secret `CODE_SERVER_PASSWORD`."
+            echo
+            echo "> This is a temporary public URL. Keep this workflow running while using VS Code."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Tunnel is running. The URL is also available in the job summary."
+          while kill -0 "$SERVER_PID" 2>/dev/null && kill -0 "$TUNNEL_PID" 2>/dev/null; do
+            sleep 15
+          done
+          echo "::error::The VS Code server or tunnel stopped."
+          exit 1
