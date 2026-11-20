@@ -72,6 +72,15 @@ jobs:
             exit 1
           fi
 
+          echo
+          echo "============================================================"
+          echo "VS CODE SERVER IS READY — OPEN THIS URL NOW:"
+          echo "$TUNNEL_URL"
+          echo "No password is required."
+          echo "Keep this GitHub Actions workflow running while using VS Code."
+          echo "============================================================"
+          echo "::notice title=VS Code Server URL::$TUNNEL_URL"
+
           {
             echo "## VS Code is ready"
             echo
@@ -82,7 +91,7 @@ jobs:
             echo "> This is a temporary public URL. Keep this workflow running while using VS Code."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "Tunnel is running. The URL is also available in the job summary."
+          echo "Tunnel is running. The URL above is available in the live Actions log."
           while kill -0 "$SERVER_PID" 2>/dev/null && kill -0 "$TUNNEL_PID" 2>/dev/null; do
             sleep 15
           done
